@@ -1,0 +1,13 @@
+1. Main Hardware Constraints Page (Most Complete):
+https://brainchip-inc.github.io/akida_examples_2.4.0-doc-1/user_guide/1.0_hw_constraints.html
+
+2. Alternative (older version but also complete):
+https://doc.brainchipinc.com/user_guide/hardware/1.0.html
+
+3. QuantizeML User Guide (conversion constraints):
+https://doc.brainchipinc.com/user_guide/quantizeml.html
+
+📄 Official Source for Layer Ordering Rules:
+https://brainchip-inc.github.io/akida_examples_2.3.0-doc-1/user_guide/hw_constraints.html
+
+https://brainchip-inc.github.io/akida_examples_2.3.0-doc-1/
