@@ -1,0 +1,4 @@
+tf_keras~=2.19.0
+tensorflow~=2.19.0
+akida==2.19.1
+quantizeml~=1.2.2

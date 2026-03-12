@@ -1,0 +1,31 @@
+Metadata-Version: 2.4
+Name: cnn2snn
+Version: 2.19.1
+Summary: Keras to Akida CNN Converter
+Home-page: https://doc.brainchipinc.com
+Author: Johan Mejia
+Author-email: jmejia@brainchip.com
+License: Apache 2.0
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: tf_keras~=2.19.0
+Requires-Dist: tensorflow~=2.19.0
+Requires-Dist: akida==2.19.1
+Requires-Dist: quantizeml~=1.2.2
+Dynamic: author
+Dynamic: author-email
+Dynamic: description
+Dynamic: description-content-type
+Dynamic: home-page
+Dynamic: license
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary
+
+# CNN2SNN toolkit
+
+The Brainchip CNN2SNN toolkit provides a means to convert Convolutional Neural
+Networks (CNN) that were trained using Deep Learning methods to a low-latency 
+and low-power Spiking Neural Network (SNN) for use with the Akida Runtime.

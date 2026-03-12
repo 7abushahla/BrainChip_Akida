@@ -1,0 +1,5 @@
+# CNN2SNN toolkit
+
+The Brainchip CNN2SNN toolkit provides a means to convert Convolutional Neural
+Networks (CNN) that were trained using Deep Learning methods to a low-latency 
+and low-power Spiking Neural Network (SNN) for use with the Akida Runtime.
