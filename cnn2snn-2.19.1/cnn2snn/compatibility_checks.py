@@ -168,6 +168,93 @@ def check_model_compatibility(model):
         return False
 
 
+def _collect_sequential_issues(model):
+    """Walk every layer of a Sequential model and collect ALL compatibility issues.
+
+    Unlike :func:`check_sequential_compatibility`, this function never raises –
+    it returns a (possibly empty) list of human-readable error strings so that
+    the caller can report every problem at once.
+
+    Args:
+        model (:obj:`keras.Model`): a Sequential Keras model (already passed
+            through :func:`prepare_to_convert`).
+
+    Returns:
+        list[str]: all compatibility issues found, one string per issue.
+    """
+    issues = []
+
+    if not isinstance(model, Sequential):
+        issues.append(
+            f"Model must be Sequential for cnn2snn conversion. Got {type(model).__name__}.")
+        return issues
+
+    if len(model.layers) == 0:
+        return issues
+
+    last_visited_neural_layer = None
+    last_visited_activation = model.layers[0]
+
+    for i, layer in enumerate(model.layers):
+        if type(layer) in neural_layers:
+            for check in (_check_dense_shape, _check_conv_params):
+                try:
+                    check(layer)
+                except (RuntimeError, ValueError) as e:
+                    issues.append(str(e))
+            try:
+                _check_two_neural_layers(layer, last_visited_neural_layer)
+            except RuntimeError as e:
+                issues.append(str(e))
+            last_visited_neural_layer = layer
+            last_visited_activation = None
+
+        elif isinstance(layer, (layers.ReLU, qlayers.QuantizedActivation)):
+            try:
+                _check_two_successive_activations(layer, last_visited_activation)
+            except RuntimeError as e:
+                issues.append(str(e))
+            last_visited_neural_layer = None
+            last_visited_activation = layer
+
+        elif isinstance(layer, (layers.MaxPool2D, layers.GlobalAvgPool2D)):
+            try:
+                _check_pooling_compatibility(model, i)
+            except RuntimeError as e:
+                issues.append(str(e))
+
+        elif isinstance(layer, layers.Flatten):
+            try:
+                _check_flatten_layer(model, i)
+            except RuntimeError as e:
+                issues.append(str(e))
+
+        elif isinstance(layer, layers.Reshape):
+            try:
+                _check_reshape_layer(layer)
+            except RuntimeError as e:
+                issues.append(str(e))
+
+        elif isinstance(layer, layers.Rescaling):
+            try:
+                _check_rescaling_compatibility(layer, i)
+            except RuntimeError as e:
+                issues.append(str(e))
+
+        elif isinstance(layer, (layers.Activation, layers.Softmax)):
+            try:
+                _check_unsupported_activation(model, i)
+            except RuntimeError as e:
+                issues.append(str(e))
+
+        else:
+            issues.append(
+                f"Layer '{layer.name}' of type {layer.__class__.__name__} is not "
+                f"supported for Akida conversion.")
+
+    return issues
+
+
 def check_sequential_compatibility(model):
     """Checks compatibility of a Sequential Keras model.
 

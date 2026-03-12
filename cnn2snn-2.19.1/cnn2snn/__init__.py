@@ -22,7 +22,7 @@ models.
 from .utils import load_quantized_model
 
 from .cnn2snn_objects import cnn2snn_objects
-from .converter import convert, check_model_compatibility
+from .converter import convert, check_model_compatibility, check_model_compatibility_all
 from .quantization_ops import (StdWeightQuantizer, StdPerAxisQuantizer,
                                MaxQuantizer, MaxPerAxisQuantizer)
 from .quantization_layers import (QuantizedConv2D, QuantizedDepthwiseConv2D,

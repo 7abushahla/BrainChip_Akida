@@ -27,7 +27,7 @@ from .quantizeml import generate_model as qml_generate_model
 import akida
 from .akida_versions import get_akida_version, AkidaVersion
 from .transforms import fix_v1_activation_variables, prepare_to_convert
-from .compatibility_checks import check_sequential_compatibility
+from .compatibility_checks import check_sequential_compatibility, _collect_sequential_issues
 from quantizeml.models import QuantizationParams, quantize as quantize_qml
 
 
@@ -89,6 +89,118 @@ def check_model_compatibility(model, device=None, input_dtype="uint8"):
             model_ak.map(device, hw_only=True)
         except Exception as e:
             raise type(e)('Incompatibility found during mapping: ' + str(e))
+
+
+def _print_issues_report(issues):
+    """Pretty-print the list of issues collected by check_model_compatibility_all."""
+    if not issues:
+        print("✅  No compatibility issues found. Model looks good!")
+        return
+    print(f"❌  Found {len(issues)} compatibility issue(s):\n")
+    for idx, issue in enumerate(issues, 1):
+        print(f"  [{idx}] {issue}")
+    print()
+
+
+def check_model_compatibility_all(model, device=None, input_dtype="uint8"):
+    """Checks Akida compatibility and reports ALL issues at once.
+
+    Unlike :func:`check_model_compatibility`, which stops at the first error,
+    this function runs every check it can independently and accumulates all
+    problems into a single report so you can fix them all in one go.
+
+    Checks performed (in order):
+      1. Preliminary version/type checks (ONNX on v1, device/version mismatch).
+      2. Per-layer structural checks on every layer (exhaustive walk).
+      3. Quantization with QuantizeML (one attempt, error captured if any).
+      4. CNN2SNN conversion (only attempted if quantization succeeded).
+      5. Hardware mapping (only if device provided and conversion succeeded).
+
+    Args:
+        model (:obj:`keras.Model` or :obj:`onnx.ModelProto`): the model to check.
+        device (:obj:`akida.HwDevice`, optional): hardware device to test mapping
+            against. Defaults to None.
+        input_dtype (np.dtype or str, optional): expected input dtype.
+            Defaults to 'uint8'.
+
+    Returns:
+        list[str]: all issues found (empty list means fully compatible).
+    """
+    issues = []
+
+    # ------------------------------------------------------------------ #
+    # 1. Preliminary checks
+    # ------------------------------------------------------------------ #
+    if (get_akida_version() == AkidaVersion.v1) and isinstance(model, ModelProto):
+        issues.append(
+            "[PRELIMINARY] Akida v1 does not support ONNX models. Use Akida v2 instead.")
+
+    if device is not None and device.ip_version == akida.IpVersion.v1 \
+            and (get_akida_version() != AkidaVersion.v1):
+        issues.append(
+            f"[PRELIMINARY] Device '{device}' is an Akida v1 device but the active "
+            f"version context is not AkidaVersion.v1.")
+
+    # Bail out early – subsequent checks would be meaningless or crash
+    if issues:
+        _print_issues_report(issues)
+        return issues
+
+    # ------------------------------------------------------------------ #
+    # 2. Per-layer structural checks (exhaustive – never stops early)
+    # ------------------------------------------------------------------ #
+    try:
+        sync_model = prepare_to_convert(model)
+        layer_issues = _collect_sequential_issues(sync_model)
+        for msg in layer_issues:
+            issues.append(f"[STRUCTURE] {msg}")
+    except Exception as e:
+        issues.append(f"[STRUCTURE] prepare_to_convert failed: {e}")
+
+    # ------------------------------------------------------------------ #
+    # 3. Quantization check
+    # ------------------------------------------------------------------ #
+    if get_akida_version() == AkidaVersion.v1:
+        q_param = QuantizationParams(
+            activation_bits=4, input_weight_bits=4, weight_bits=4,
+            per_tensor_activations=True, input_dtype=input_dtype)
+    else:
+        q_param = QuantizationParams(input_dtype=input_dtype)
+
+    model_q = None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            model_q = quantize_qml(model, qparams=q_param, num_samples=1)
+    except Exception as e:
+        issues.append(f"[QUANTIZATION] {e}")
+
+    # ------------------------------------------------------------------ #
+    # 4. Conversion check
+    # ------------------------------------------------------------------ #
+    model_ak = None
+    if model_q is not None:
+        try:
+            model_ak = convert(model_q)
+        except Exception as e:
+            issues.append(f"[CONVERSION] {e}")
+    else:
+        issues.append("[CONVERSION] Skipped — quantization failed.")
+
+    # ------------------------------------------------------------------ #
+    # 5. Hardware mapping check
+    # ------------------------------------------------------------------ #
+    if device is not None:
+        if model_ak is not None:
+            try:
+                model_ak.map(device, hw_only=True)
+            except Exception as e:
+                issues.append(f"[MAPPING] {e}")
+        else:
+            issues.append("[MAPPING] Skipped — conversion failed.")
+
+    _print_issues_report(issues)
+    return issues
 
 
 def convert(model, file_path=None, input_scaling=None):
