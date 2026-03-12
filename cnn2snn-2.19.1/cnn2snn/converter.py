@@ -102,6 +102,76 @@ def _print_issues_report(issues):
     print()
 
 
+def _check_static_v1_constraints(model):
+    """Check static Akida v1 constraints that aren't fully enforced elsewhere.
+
+    This covers things like input dimensions and Dense fan-in size so that
+    a model passing this check has a much higher chance to fully run on v1
+    hardware, not just convert.
+    """
+    issues = []
+
+    # Only apply to Keras models in Akida v1 context
+    if get_akida_version() != AkidaVersion.v1 or isinstance(model, ModelProto):
+        return issues
+
+    # --- Input dimensions: width ≤ 256, height ≥ 5, channels in {1, 3} ---
+    try:
+        input_shape = getattr(model, "input_shape", None)
+        if isinstance(input_shape, (list, tuple)) and input_shape and isinstance(input_shape[0], (list, tuple)):
+            # Functional models sometimes expose a list of input shapes
+            input_shape = input_shape[0]
+
+        if input_shape is not None:
+            # Accept (batch, H, W, C) or (H, W, C)
+            if len(input_shape) == 4:
+                _, h, w, c = input_shape
+            elif len(input_shape) == 3:
+                h, w, c = input_shape
+            else:
+                h = w = c = None
+
+            if w is not None and w > 256:
+                issues.append(
+                    f"[INPUT] Input width {w} exceeds Akida v1 limit of 256 pixels.")
+            if h is not None and h < 5:
+                issues.append(
+                    f"[INPUT] Input height {h} is below Akida v1 minimum of 5 pixels.")
+            if c is not None and c not in (1, 3):
+                issues.append(
+                    f"[INPUT] Input channels must be 1 or 3 for Akida v1. Receives {c}.")
+        else:
+            issues.append("[INPUT] Could not determine input_shape for model.")
+    except Exception as e:  # pragma: no cover - defensive
+        issues.append(f"[INPUT] Failed to inspect input_shape: {e}")
+
+    # --- Dense fan-in: total input features ≤ 57,334 ---
+    try:
+        for layer in getattr(model, "layers", []):
+            if isinstance(layer, keras.layers.Dense):
+                in_shape = getattr(layer, "input_shape", None)
+                if not in_shape:
+                    continue
+                # (batch, N) or (batch, 1, 1, N)
+                if len(in_shape) == 2:
+                    features = in_shape[-1]
+                elif len(in_shape) == 4 and in_shape[1] == 1 and in_shape[2] == 1:
+                    features = in_shape[-1]
+                else:
+                    # Non-standard Dense input shapes will already be caught by
+                    # structural checks; no need to duplicate here.
+                    continue
+
+                if features is not None and features > 57334:
+                    issues.append(
+                        f"[DENSE] Dense layer '{layer.name}' has {features} input features, "
+                        "exceeding the Akida v1 guideline of 57,334.")
+    except Exception as e:  # pragma: no cover - defensive
+        issues.append(f"[DENSE] Failed to inspect Dense fan-in sizes: {e}")
+
+    return issues
+
+
 def check_model_compatibility_all(model, device=None, input_dtype="uint8"):
     """Checks Akida compatibility and reports ALL issues at once.
 
@@ -156,6 +226,12 @@ def check_model_compatibility_all(model, device=None, input_dtype="uint8"):
             issues.append(f"[STRUCTURE] {msg}")
     except Exception as e:
         issues.append(f"[STRUCTURE] prepare_to_convert failed: {e}")
+
+    # ------------------------------------------------------------------ #
+    # 2b. Static Akida v1-specific constraints (input dims, Dense fan-in)
+    # ------------------------------------------------------------------ #
+    static_issues = _check_static_v1_constraints(model)
+    issues.extend(static_issues)
 
     # ------------------------------------------------------------------ #
     # 3. Quantization check
