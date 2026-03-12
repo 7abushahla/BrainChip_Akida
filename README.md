@@ -1,17 +1,87 @@
 # BrainChip Akida AKD1000  
 Using the AKD1000 PCIe Card installed on a Raspberry Pi Compute Module 4 Board.
 
+## Akida v1 Overview
+
+Akida v1 is a neuromorphic CNN accelerator that executes **event‑driven, integer‑only** networks derived from standard CNNs. Models are trained in floating point, quantized with **QuantizeML**, converted with **CNN2SNN**, and finally deployed to the Akida runtime, which runs them as sparse, event‑based networks on chip.
+
+At the processor level, Akida implements **rank coding**, where information is represented by the **time and location of events**. Synapses store weights, neurons integrate weighted incoming events, and an output event is generated only when the accumulated input exceeds a threshold. Zero values generate no events, enabling highly sparse and energy‑efficient computation.
+
+## Akida v1 Deployment Constraints (High‑Level)
+
+These are the most important constraints you must satisfy *before* quantization and conversion; violating them typically results in conversion errors or forces layers to run in software only.
+
+### Input and Model Structure
+
+- **Input dimensions**
+  - **Width**: 5–256 pixels  
+  - **Height**: ≥ 5 pixels  
+  - **Channels**: 1 or 3 only
+- **Model API**
+  - **Use**: Keras **Sequential** or **Functional** API  
+  - **Avoid**: Subclassed `keras.Model` (no dynamic / undefined input shapes)
+  - **Input shape** must be explicitly defined in the `Input` layer.
+
+### Convolution, Pooling, and Block Patterns
+
+- **First convolution (InputConvolutional)**
+  - Kernel: 3×3, 5×5, or 7×7  
+  - Stride: 1, 2, or 3  
+  - Padding: `'same'` or `'valid'`
+
+- **Subsequent convolutions**
+  - Kernel: 1×1, 3×3, 5×5, or 7×7  
+  - Stride: 1 or 2 (stride 2 only allowed with 3×3 kernels)  
+  - Padding: **`'same'` only**  
+  - No dilated or grouped convolutions.
+
+- **MaxPooling**
+  - Pool sizes: 1×1 or 2×2 (for the first conv, also 1×2 or 2×1)  
+  - Stride: ≤ pool size  
+  - Padding: **must match** the preceding Conv layer.
+
+- **GlobalAveragePooling**
+  - Output width ≤ 32  
+  - Convolutional output height ≥ 3 rows.
+
+- **Valid block patterns (examples)**
+  - `Conv → ReLU`  
+  - `Conv → MaxPool → ReLU`  
+  - `Conv → BatchNorm → ReLU`  
+  - `Conv → BatchNorm → ReLU → MaxPool`  
+  - `Conv (…optional blocks…) → GlobalAveragePooling`  
+  - `Flatten → Dense → ReLU`
+
+- **Layer ordering rules**
+  - A `Conv + MaxPool` block **must be followed by another Conv**, not directly by Dense/Flatten.  
+  - The **last Conv before Dense must not have MaxPool**.  
+  - If used, `BatchNorm` must come **before** activation.  
+  - `Flatten` is only supported **directly before** Dense layers.
+
+### Activations
+
+- **ReLU**
+  - Must be **bounded**: use `ReLU(max_value=6.0)`  
+  - Should be **separate layers** (not passed as `activation='relu'` inside Conv/Dense).
+- **Non‑ReLU activations**
+  - Only allowed in the **final output layer** (e.g., Softmax / sigmoid).
+
+### Dense Layers
+
+- Input to Dense must be **flattened** (spatial width = height = 1).  
+- Total input features to a Dense layer must be **≤ 57,334**.
+
+---
 
 ## Quantization  
+
 BrainChip uses the **QuantizeML** toolkit for model quantization. QuantizeML applies a **uniform, symmetric (zero-centered)** quantization scheme, where a floating-point tensor $x$ is mapped to an integer tensor $x_{\mathrm{int}}$ using a scale factor $s$:
-
-
 
 $$
 x_{\mathrm{int}} = \mathrm{clip}\left(\mathrm{round}\left(\frac{x}{s}\right), q_{\min}, q_{\max}\right)
 $$
 
-with the scale chosen from the dynamic range, calculated as follows
+with the scale chosen from the dynamic range, calculated as:
 
 $$
 s = \frac{\max(|x|)}{2^b - 1},
@@ -20,7 +90,7 @@ $$
 and dequantization approximated as
 
 $$
-x \approx x_{\mathrm{int}} \cdot s,
+x \approx x_{\mathrm{int}} \cdot s.
 $$
 
 In addition to this quantization mapping, QuantizeML represents layer inputs, outputs, and weights using FixedPoint (QFloat) values, where
@@ -38,6 +108,21 @@ Example from the QuantizeML documentation for representing $\pi$ in 8-bit FixedP
 | 1 | 6   | 3.0 |
 | 3 | 25  | 3.125 |
 | 6 | 201 | 3.140625 |
+
+### Akida v1 Quantization Bit‑Widths and Data Types
+
+On Akida v1, quantized layers must respect specific bit‑widths and data types:
+
+| Layer Type | Input bits | Weight bits | Activation bits |
+|-----------|-----------:|------------:|----------------:|
+| InputConv | 8          | 8           | 1, 2, 4         |
+| Conv      | 1, 2, 4    | 1, 2, 4     | 1, 2, 4         |
+| Dense     | 1, 2, 4    | 1, 2, 4     | 1, 2, 4         |
+
+- **Training / Quantization**: tensors are typically `float32`.  
+- **Inference on Akida**: inputs must be `uint8` (e.g., images scaled to [0, 255] and cast to `np.uint8`).
+
+---
 
 ## ANN-to-SNN Conversion
 BrainChip uses the **CNN2SNN** toolkit to convert a **QuantizeML-quantized CNN** into an **Akida runtime-compatible model**. In the official workflow, the deployment pipeline is:
