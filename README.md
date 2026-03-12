@@ -1,6 +1,19 @@
 # BrainChip Akida AKD1000  
 Using the AKD1000 PCIe Card installed on a Raspberry Pi Compute Module 4 Board.
 
+## Table of Contents
+
+- [Akida v1 Overview](#akida-v1-overview)
+- [Akida v1 Deployment Constraints (High‑Level)](#akida-v1-deployment-constraints-highlevel)
+  - [Input and Model Structure](#input-and-model-structure)
+  - [Convolution, Pooling, and Block Patterns](#convolution-pooling-and-block-patterns)
+  - [Activations](#activations)
+  - [Dense Layers](#dense-layers)
+- [Quantization](#quantization)
+  - [Bit‑Widths and Data Types](#bitwidths-and-data-types)
+- [ANN-to-SNN Conversion](#ann-to-snn-conversion)
+- [How Inference Runs on Akida Hardware](#how-inference-runs-on-akida-hardware)
+
 ## Akida v1 Overview
 
 Akida v1 is a neuromorphic CNN accelerator that executes **event‑driven, integer‑only** networks derived from standard CNNs. Models are trained in floating point, quantized with **QuantizeML**, converted with **CNN2SNN**, and finally deployed to the Akida runtime, which runs them as sparse, event‑based networks on chip.
@@ -109,7 +122,7 @@ Example from the QuantizeML documentation for representing $\pi$ in 8-bit FixedP
 | 3 | 25  | 3.125 |
 | 6 | 201 | 3.140625 |
 
-### Akida v1 Quantization Bit‑Widths and Data Types
+### Bit‑Widths and Data Types
 
 On Akida v1, quantized layers must respect specific bit‑widths and data types:
 
