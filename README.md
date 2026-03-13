@@ -148,19 +148,21 @@ In the current QuantizeML workflow, the converter largely dispatches to `_conver
 
 As a result, the CNN is not transformed into a classical software SNN (such as those used in frameworks like SpikingJelly or SNN Toolbox). Rather, the model is lowered to an **Akida event-domain representation**. A more accurate description of the pipeline would therefore be:
 
-**Quantized CNN → Akida-native event-driven network**
+**Quantized CNN → Akida-native event-driven / SNN-equivalent network**
 
-At the processor level, Akida implements **rank coding**, where information is represented by the **time and location of events**. The hardware operates in an event-driven manner: synapses store weights, neurons integrate weighted incoming events, and an output event is generated only when the accumulated input exceeds a threshold. Zero values generate no events, enabling highly sparse and energy-efficient computation.
+At the processor level, Akida implements **rank coding**, where information is represented by the **time and location of events**. The hardware operates in an event-driven manner: synapses store weights, neurons integrate weighted incoming events, and an output event is generated only when the accumulated input exceeds a threshold. Zero or negative summed inputs generate no output event, enabling sparse and energy-efficient computation.
 
 ## How Inference Runs on Akida Hardware
-Although Akida does not expose a user-defined simulation horizon \(T\) for converted CNNs, inference is still carried out in an event-driven neuromorphic manner at the hardware level.
+For **Akida 1.0**, the public MetaTF/CNN2SNN workflow is best understood as realizing an **SNN-equivalent event-domain model**, rather than exposing a classical multi-timestep software SNN with explicit IF/LIF layers and a user-defined simulation horizon \(T\).
 
-At the software boundary, the chip receives a **quantized tensor**, not a manually generated spike train over multiple timesteps. Inside the processor, **nonzero sparse activations are converted into multi-bit events**, while zero values produce no events. These events are then routed across Akida’s mesh of neural processing units (NPUs), where synapses store weights and neurons accumulate weighted incoming events in local digital state.
+At the software boundary, the chip receives a **quantized tensor**, and the converted Akida model is represented using integer runtime layers. In the public API, these converted layers are still described as convolutional / fully connected Akida layers with optional **step-wise ReLU** or related quantized activations. This suggests that the converted model is not exposed as a standard timestep-unrolled SNN graph in the way common SNN frameworks do.
 
-When the accumulated input exceeds a threshold, the neuron emits an output event that propagates to subsequent layers. In this sense, time exists implicitly through **event arrival, ordering, and hardware execution**, rather than as an explicit outer loop over \(T\) timesteps as in classical rate-coded SNN simulators.
+Several recent papers interpret this behavior as follows: Akida uses an **equivalent representation of an SNN** based on **step-wise quantized ReLU**, allowing inference to be carried out in **a single time step / single hardware pass**. In particular, one paper states that the chip “**squashes the rate-code approximation of the ReLU into one time step**,” where it is then represented by a step-wise quantized ReLU.
 
-A useful mental model is:
+At the same time, the exact neuron model used for converted MetaTF/CNN2SNN models is **not clearly documented** in the currently available public documentation. A recent analysis notes that the implementation appears to reduce converted spiking computation to a **single time step**, while also arguing that the processor behavior itself is still consistent with **ROC decoding** and **integrate-and-fire-style** event processing.
 
-**quantized sparse tensor → nonzero activations converted to events → events routed across NPUs → weighted accumulation in neurons → threshold crossing emits new events → only emitted events propagate further**
+A useful mental model is therefore:
 
-Therefore, Akida inference is best understood as **event-driven execution of a quantized CNN on neuromorphic hardware**, rather than a classical timestep-based ANN-to-SNN simulation with explicit ReLU-to-IF replacement.
+**quantized sparse tensor → nonzero activations represented as events → events routed across NPUs → weighted accumulation in neurons → threshold crossing emits new events → only emitted events propagate further**
+
+So, for converted CNNs on Akida 1.0, inference is best described as **single-step SNN-equivalent execution on event-driven neuromorphic hardware**, rather than as an explicitly exposed multi-timestep rate-coded IF/LIF simulation.
